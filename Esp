@@ -1,64 +1,96 @@
--- PlayerOutlines (LocalScript)
--- Place this inside StarterPlayerScripts
--- Uses Highlight to draw a smooth outline around other players' characters (not yourself)
- 
+-- PlayerOutlines LocalScript
+-- Place this inside StarterPlayerScripts or StarterCharacterScripts
+
 local Players = game:GetService("Players")
- 
 local localPlayer = Players.LocalPlayer
- 
--- =====================
---   Customize here
--- =====================
-local OUTLINE_COLOR        = Color3.fromRGB(0, 120, 255)  -- Color of the outline glow
-local OUTLINE_TRANSPARENCY = 0                             -- 0 = fully visible, 1 = invisible
-local FILL_TRANSPARENCY    = 1                             -- 1 = outline only (no fill), 0 = solid fill
--- =====================
- 
-local highlights = {}  -- [Player] = Highlight instance
- 
-local function removeHighlight(player)
-	if highlights[player] then
-		highlights[player]:Destroy()
-		highlights[player] = nil
-	end
-end
- 
-local function applyHighlight(character)
+
+-- Settings (customize these!)
+local OUTLINE_COLOR   = Color3.fromRGB(0, 255, 255)        -- Aqua outline color
+local FILL_COLOR      = Color3.fromRGB(0, 255, 255)        -- Aqua fill color
+local FILL_OPACITY    = 0                                   -- 0 = transparent fill, 1 = solid
+local OUTLINE_OPACITY = 1                                   -- 0 = invisible, 1 = fully visible
+local SHOW_ON_SELF    = false                               -- Set true to also outline yourself
+local DEPTH_MODE      = Enum.HighlightDepthMode.AlwaysOnTop -- Shows through walls; use "Occluded" to hide behind walls
+local REFRESH_RATE    = 5                                   -- Seconds between each outline refresh
+
+-- Applies a Highlight to a character model
+local function applyOutline(character)
+	if character:FindFirstChildOfClass("Highlight") then return end
+
 	local highlight = Instance.new("Highlight")
 	highlight.OutlineColor        = OUTLINE_COLOR
-	highlight.OutlineTransparency = OUTLINE_TRANSPARENCY
-	highlight.FillTransparency    = FILL_TRANSPARENCY
+	highlight.FillColor           = FILL_COLOR
+	highlight.FillTransparency    = FILL_OPACITY == 0 and 1 or (1 - FILL_OPACITY)
+	highlight.OutlineTransparency = 1 - OUTLINE_OPACITY
+	highlight.DepthMode           = DEPTH_MODE
 	highlight.Adornee             = character
 	highlight.Parent              = character
-	return highlight
 end
- 
-local function onCharacterAdded(player, character)
-	removeHighlight(player)
-	character:WaitForChild("HumanoidRootPart", 10)
-	highlights[player] = applyHighlight(character)
+
+-- Refreshes the Highlight with no flicker (new one created before old one is destroyed)
+local function refreshOutline(character)
+	local old = character:FindFirstChildOfClass("Highlight")
+
+	local highlight = Instance.new("Highlight")
+	highlight.OutlineColor        = OUTLINE_COLOR
+	highlight.FillColor           = FILL_COLOR
+	highlight.FillTransparency    = FILL_OPACITY == 0 and 1 or (1 - FILL_OPACITY)
+	highlight.OutlineTransparency = 1 - OUTLINE_OPACITY
+	highlight.DepthMode           = DEPTH_MODE
+	highlight.Adornee             = character
+	highlight.Parent              = character
+
+	-- Destroy the old one AFTER the new one is already parented
+	if old then old:Destroy() end
 end
- 
+
+-- Removes the Highlight from a character
+local function removeOutline(character)
+	local h = character:FindFirstChildOfClass("Highlight")
+	if h then h:Destroy() end
+end
+
+-- Handles a player being added to the game
 local function onPlayerAdded(player)
-	if player == localPlayer then return end  -- Skip yourself
- 
-	player.CharacterAdded:Connect(function(character)
-		onCharacterAdded(player, character)
-	end)
- 
+	if not SHOW_ON_SELF and player == localPlayer then return end
+
 	if player.Character then
-		onCharacterAdded(player, player.Character)
+		applyOutline(player.Character)
 	end
+
+	player.CharacterAdded:Connect(function(character)
+		task.wait(0.1)
+		applyOutline(character)
+	end)
+
+	player.CharacterRemoving:Connect(function(character)
+		removeOutline(character)
+	end)
 end
- 
-local function onPlayerRemoving(player)
-	removeHighlight(player)
-end
- 
-Players.PlayerAdded:Connect(onPlayerAdded)
-Players.PlayerRemoving:Connect(onPlayerRemoving)
- 
+
+-- Hook up all current and future players
 for _, player in ipairs(Players:GetPlayers()) do
 	onPlayerAdded(player)
 end
- 
+
+Players.PlayerAdded:Connect(onPlayerAdded)
+
+-- Remove outlines when a player leaves
+Players.PlayerRemoving:Connect(function(player)
+	if player.Character then
+		removeOutline(player.Character)
+	end
+end)
+
+-- Flicker-free refresh loop
+task.spawn(function()
+	while true do
+		task.wait(REFRESH_RATE)
+		for _, player in ipairs(Players:GetPlayers()) do
+			if not SHOW_ON_SELF and player == localPlayer then continue end
+			if player.Character then
+				refreshOutline(player.Character)
+			end
+		end
+	end
+end)
